@@ -1,0 +1,67 @@
+---
+title: "Elektrownie"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE, echo = FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r loadLibrary, include = FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2) 
+library("Hmisc")
+library('corrplot')
+```
+
+##Wczytywanie danych z pliku
+```{r summariseData, cache=TRUE, echo=TRUE}
+all_data <- read.csv(file="elektrownie.csv", header=TRUE, sep=",")
+```
+
+##Kod przetwarzający dane
+```{r, echo = TRUE}
+needed_data <- all_data %>% select('idsito', 'idmodel', 'idbrand', 'lat', 'lon', 'ageinmonths', 'data', 'temperatura_ambiente', 'irradiamento', 'pressure', 'windspeed', 'humidity', 'dewpoint', 'windbearing', 'cloudcover', 'kwh')
+colnames(needed_data) <- c("place", "model", "brand", "latitude","longitude", "age", "data", "temperature", "radiation", "pressure", "windspeed", "humidity", "dewpoint", "bearing", "cloudcover", "energy")
+idbrands_with_models <- unique(needed_data[c("brand", "model")])
+idmodels <- unique(needed_data$model)
+idbrands <- unique(needed_data$brand)
+```
+
+##Wykresy
+```{r}
+inputPanel(
+  selectInput("modelId", label = "Model:",
+                choices = idmodels), 
+  selectInput("columnName", label = "Oś x:",
+                choices = c("temperatura" = "temperature", "promieniowanie" = "radiation", "ciśnienie" = "pressure", "prędkość wiatru" = "windspeed", "wilgotność" = "humidity"), selected = "temperature")
+)
+
+renderPlot({
+  plot_data <- needed_data %>% filter(model == input$modelId)
+  column <- plot_data %>% select(input$columnName)
+  ggplot(data=plot_data, aes(x=column,y=plot_data$energy)) + geom_point() + labs(title=paste("Wyprodukowana energia w zależności od ", input$columnName), x =input$columnName, y = "Energia")
+})
+```
+
+##Korelacja
+```{r}
+inputPanel(
+  selectInput("xCorrelation", label = "X:",
+                choices = c("szerokość geograficzna" = "latitude","długość geograficzna" = "longitude", "temperatura" = "temperature", "promieniowanie" = "radiation", "ciśnienie" = "pressure", "prędkość wiatru" = "windspeed", "wilgotność" = "humidity", "model" = "model", "wiek" = "age", "dewpoint" = "dewpoint","łożysko" = "bearing", "zachmurzenie" = "cloudcover"), selected = "temperature"),
+  selectInput("correlationMethod", label = "Metoda korelacji",
+                choices = c("pearson", "kendall", "spearman"), selected = "pearson")
+)
+renderPrint({
+  x <- needed_data %>% select(input$xCorrelation)
+  y <- needed_data %>% select(energy)
+  cor(x, y, method = input$correlationMethod)
+})
+renderPrint({
+  x <- needed_data %>% select(input$xCorrelation)
+  y <- needed_data %>% select(energy)
+  cor(x, y, method = input$correlationMethod)
+})
+```
