@@ -2,12 +2,23 @@
 title: "Elektrownie"
 output: html_document
 runtime: shiny
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: "Agnieszka Szymborska"
 ---
 
 ```{r setup, include=FALSE, echo = FALSE}
 knitr::opts_chunk$set(echo = FALSE)
 ```
 
+# Spis treści
+1. [Wczytywanie danych](#load)
+2. [Przetwarzanie danych](#prepare_data)
+3. [Wykres zależności wyprodukowanej energii od parametru](#energy_parameter_plot)
+4. [Korelacja](#correlation)
+    1. [Energia z wybranym parametrem](#correlation_energy_parameter)
+    2. [Macierz korelacji](#correlation_matrix)
+  
+#Ładowanie bibliotek
 ```{r loadLibrary, include = FALSE}
 library(dplyr)
 library(tidyr)
@@ -15,22 +26,38 @@ library(ggplot2)
 library("Hmisc")
 library('corrplot')
 ```
-
-##Wczytywanie danych z pliku
+#<a name="load"></a>
+#Wczytywanie danych z pliku
 ```{r summariseData, cache=TRUE, echo=TRUE}
 all_data <- read.csv(file="elektrownie.csv", header=TRUE, sep=",")
 ```
 
-##Kod przetwarzający dane
+#<a name="prepare_data"></a>
+#Kod przetwarzający dane
 ```{r, echo = TRUE}
 needed_data <- all_data %>% select('idsito', 'idmodel', 'idbrand', 'lat', 'lon', 'ageinmonths', 'data', 'temperatura_ambiente', 'irradiamento', 'pressure', 'windspeed', 'humidity', 'dewpoint', 'windbearing', 'cloudcover', 'kwh')
 colnames(needed_data) <- c("place", "model", "brand", "latitude","longitude", "age", "data", "temperature", "radiation", "pressure", "windspeed", "humidity", "dewpoint", "bearing", "cloudcover", "energy")
+radiation <- all_data %>% select('id', 'idsito','irradiamento', 'ora', 'day', 'data')
+hours <- unique(radiation$ora)
+for(index in 4:18) {
+  zero_values <- radiation %>% filter(ora == hours[index] & irradiamento == 0)
+  for(value in zero_values) {
+    before_value <- radiation %<% filter(ora = hours[index - 1] & day = value$day & idsito = value$idsito)
+    if(before_value$irradiamento > 0) {
+      after_value <- radiation %<% filter(ora = hours[index + 1] & day = value$day & idsito = value$idsito)
+      value$irradiamento = (before_value$irradiamento + after_value$irradiamento) / 2
+    }
+  }
+}
+
 idbrands_with_models <- unique(needed_data[c("brand", "model")])
 idmodels <- unique(needed_data$model)
 idbrands <- unique(needed_data$brand)
+
 ```
 
-##Wykresy
+#<a name="energy_parameter_plot"></a>
+#Wykres zależności energii od wybranego parametru dla wybranego czujnika
 ```{r}
 inputPanel(
   selectInput("modelId", label = "Model:",
@@ -42,26 +69,31 @@ inputPanel(
 renderPlot({
   plot_data <- needed_data %>% filter(model == input$modelId)
   column <- plot_data %>% select(input$columnName)
-  ggplot(data=plot_data, aes(x=column,y=plot_data$energy)) + geom_point() + labs(title=paste("Wyprodukowana energia w zależności od ", input$columnName), x =input$columnName, y = "Energia")
+  ggplot(data=plot_data, aes(x=column,y=plot_data$energy)) + geom_point() + labs(title=paste("Wyprodukowana energia w zależności od ", input$columnName), x =input$columnName, y = "Energia") + geom_smooth(method="lm")
 })
 ```
 
-##Korelacja
+#<a name="correlation"></a>
+#Korelacja
+#<a name="correlation_energy_parameter"></a>
+##Korelacja wyprodukowanej energii z wybranym parametrem
 ```{r}
 inputPanel(
   selectInput("xCorrelation", label = "X:",
-                choices = c("szerokość geograficzna" = "latitude","długość geograficzna" = "longitude", "temperatura" = "temperature", "promieniowanie" = "radiation", "ciśnienie" = "pressure", "prędkość wiatru" = "windspeed", "wilgotność" = "humidity", "model" = "model", "wiek" = "age", "dewpoint" = "dewpoint","łożysko" = "bearing", "zachmurzenie" = "cloudcover"), selected = "temperature"),
-  selectInput("correlationMethod", label = "Metoda korelacji",
-                choices = c("pearson", "kendall", "spearman"), selected = "pearson")
+                choices = c("szerokość geograficzna" = "latitude","długość geograficzna" = "longitude", "temperatura" = "temperature", "promieniowanie" = "radiation", "ciśnienie" = "pressure", "prędkość wiatru" = "windspeed", "wilgotność" = "humidity", "model" = "model", "wiek" = "age", "dewpoint" = "dewpoint","łożysko" = "bearing", "zachmurzenie" = "cloudcover"), selected = "temperature")
 )
 renderPrint({
   x <- needed_data %>% select(input$xCorrelation)
   y <- needed_data %>% select(energy)
-  cor(x, y, method = input$correlationMethod)
+  cor(x, y, method = "pearson")
 })
-renderPrint({
-  x <- needed_data %>% select(input$xCorrelation)
-  y <- needed_data %>% select(energy)
-  cor(x, y, method = input$correlationMethod)
-})
+```
+
+#<a name="correlation_matrix"></a>
+##Macierz korelacji wszystkich parametrów
+
+```{r}
+matrix_data <- needed_data %>% select(-data)
+M<-cor(matrix_data)
+corrplot(M, type="upper", order="hclust", tl.col="black", tl.srt=45)
 ```
