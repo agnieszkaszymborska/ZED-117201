@@ -19,10 +19,10 @@ knitr::opts_chunk$set(echo = FALSE)
 #Ładowanie bibliotek
 ```{r loadLibrary, echo = TRUE, message = FALSE}
 library(dplyr)
-library(tidyr)
 library(ggplot2) 
 library('corrplot')
 library(caret)
+library(plotly)
 ```
 #<a name="load"></a>
 #Wczytywanie danych z pliku
@@ -33,30 +33,35 @@ all_data <- read.csv(file="elektrownie.csv", header=TRUE, sep=",")
 #<a name="prepare_data"></a>
 #Kod przetwarzający dane
 ##Zmiana nazw kolumn
-```{r, echo = TRUE, cache = TRUE}
+```{r columnNames, echo = TRUE, cache = TRUE}
 needed_data <- all_data %>% select(-icon, -(tempi:irri_pvgis_mod))
 colnames(needed_data) <- c("measurementId", "place", "model", "brand", "latitude","longitude", "age", "year", "day", "hour", "date", "temperature", "radiation", "pressure", "windspeed", "humidity", "dewpoint", "bearing", "cloudcover", "energy")
 needed_data$only_day <- as.numeric(format(as.POSIXct(factor(needed_data$date),format="%m/%d/%Y %H:%M"),"%d"))
 needed_data$only_month <- as.numeric(format(as.POSIXct(factor(needed_data$date),format="%m/%d/%Y %H:%M"),"%m"))
 needed_data$only_hour <- as.numeric(format(as.POSIXct(factor(needed_data$date),format="%m/%d/%Y %H:%M"),"%H"))
+needed_data$place_string <- paste("place: ", as.character(needed_data$place))
 ```
 
 ##Uzupełnienie zerowych wartości
 ###Wyodrębnienie modeli, marek oraz umiejscowienia czujników
-```{r, echo = TRUE, cache = TRUE}
+W zbiorze występują dane dla 17 różnych lokalizacji. Lokalizację okreś
+```{r uniqueValues, echo = TRUE, cache = TRUE}
 idbrands_with_models <- unique(needed_data[c("brand", "model")])
 idmodels <- unique(needed_data$model)
 idbrands <- unique(needed_data$brand)
+idplaces <- unique(needed_data$place)
 gps <- unique(needed_data[c("latitude", "longitude")])
+gps_with_places_id <- unique(needed_data[c("latitude", "longitude", "place")])
 ```
 
 ###Ciśnienie
-```{r, echo = TRUE, cache=TRUE}
+Ze względu na to, że w zbiorze występują dla cisnienia (pressure) tylko wartości zerowe albo większe niż 0.7, uznano, że zerowe wartości są wynikiem awarii czujników i zastąpiono je średnią niezerowych wartości ciśnienia dla określonej lokalizacji. Jeśli wystąpiłaby sytuacja, że dla danej lokalizacji nie byłoby żadnego pomiaru ciśnienia to wartości zerowe zastępowane sa średnią ciśnienia dla wszystkich lokalizacji.
+```{r pressure, echo = TRUE, cache=TRUE}
 empty_values <- needed_data %>% filter(pressure == 0)
 not_empty_values <- needed_data %>% filter(pressure > 0)
-for(idmodel in idmodels) {
-  empty_pressure <- empty_values %>% filter(model == idmodel)
-  pressure_column <- not_empty_values %>% filter(model == idmodel) %>% select(pressure)
+for(idplace in idplaces) {
+  empty_pressure <- empty_values %>% filter(place == idplace)
+  pressure_column <- not_empty_values %>% filter(place == idplace) %>% select(pressure)
   average_value <- mean(pressure_column$pressure)
   if(is.na(average_value)) {
     pressure_column <- not_empty_values %>% select(pressure)
@@ -64,24 +69,25 @@ for(idmodel in idmodels) {
   }
   for(i in 1:nrow(empty_pressure)) {
     row <- empty_pressure[i, ]
-      needed_data$pressure[[which(needed_data$measurementId == row$measurementId)]] <- average_value
+      needed_data$pressure[which(needed_data$measurementId == row$measurementId)] <- average_value
   }
 }
 
 ```
 
 ###Nasłonecznienie
-```{r, echo = TRUE, cache=TRUE}
-empty_values <- needed_data %>% filter(radiation == 0)
-not_empty_values <- needed_data %>% filter(radiation > 0)
-for(idmodel in idmodels) {
-  empty_radiation <- empty_values %>% filter(model == idmodel & only_hour > 6 & only_hour  < 18 & radiation == 0)
+Założono, że w nocy nasłonecznienie wynosi 0, stąd zastapiono tylko wartości zerowe dla nasłonecznienia (radiation) z przediału godzinnego <6;18>. Wartości zerowe zastąpiono średnią wartościa parametru dla danej lokalizacji w danym miesiącu o danej godzinie.
+```{r radiation, echo = TRUE, cache=TRUE}
+empty_values <- needed_data %>% filter(radiation == 0 & only_hour > 5 & only_hour  < 19)
+not_empty_values <- needed_data %>% filter(radiation > 0 & only_hour > 5 & only_hour  < 19)
+for(idplace in idplaces) {
+  empty_radiation <- empty_values %>% filter(place == idplace)
   if(nrow(empty_radiation) > 0) {
     for(i in 1:nrow(empty_radiation)) {
       row <- empty_radiation[i, ]
       cloudcover_low <- row$cloudcover - 0.1
       cloudcover_up <- row$cloudcover + 0.1
-      radiation_column <- not_empty_values %>% filter(model == idmodel & radiation > 0 & only_hour == row$only_hour & only_month == row$only_month & cloudcover > cloudcover_low & cloudcover < cloudcover_up) %>% select(radiation)
+      radiation_column <- not_empty_values %>% filter(place == idplace & only_hour == row$only_hour & only_month == row$only_month & cloudcover > cloudcover_low & cloudcover < cloudcover_up) %>% select(radiation)
       if(nrow(radiation_column) > 0) {
         average_value <- mean(radiation_column$radiation)
           if(!is.na(average_value)) {
@@ -101,30 +107,19 @@ knitr::kable(summary(needed_data))
 
 #<a name="correlation"></a>
 #Korelacja
-#<a name="correlation_energy_parameter"></a>
-##Korelacja wybranych parametrów
-```{r}
-idbrands_with_models <- unique(needed_data[c("brand", "model")])
-idmodels <- unique(needed_data$model)
-idbrands <- unique(needed_data$brand)
-gps <- unique(needed_data[c("latitude", "longitude")])
-plots_data <- needed_data %>% select(-measurementId, -brand, -place, -longitude, -latitude, -year, -date, -only_day, -only_month, -only_hour)
-
-  x <- needed_data %>% select(humidity)
-  y <- needed_data %>% select(energy)
-  cor(x, y, method = "pearson")
-
-  for(idmodel in idmodels) {
-    plot_data <- plots_data %>% filter(model == idmodel)
-    ggplot(data=plot_data, aes(x=radiation,y=energy)) + geom_point() + labs(title="Energia w zależności od wilgotności", x = "radiation", y = "energy") + geom_smooth(method="lm")
-  }
-```
 
 #<a name="correlation_matrix"></a>
 ##Macierz korelacji wszystkich parametrów
 
 ```{r}
-matrix_data <- needed_data %>% select(-year, -date, -only_day, -only_month, -only_hour)
+matrix_data <- needed_data %>% select(-year, -date, -only_day, -only_month, -only_hour, -place_string)
 M<-cor(matrix_data)
 corrplot(M, type="upper", order="hclust", tl.col="black", tl.srt=45)
+```
+
+#<a name="correlation_energy_parameter"></a>
+##Korelacja wybranych parametrów
+```{r wykresy, message = FALSE}
+plots_data <- needed_data %>% select(-measurementId, -brand, -longitude, -latitude, -year, -date, -only_day, -only_month, -only_hour)
+plot_ly(data = plots_data, x = ~radiation, y = ~energy, color = ~place_string, colors = "Set1", visible = "legendonly")
 ```
