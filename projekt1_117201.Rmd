@@ -33,18 +33,19 @@ all_data <- read.csv(file="elektrownie.csv", header=TRUE, sep=",")
 #<a name="prepare_data"></a>
 #Kod przetwarzający dane
 ##Zmiana nazw kolumn
-```{r columnNames, echo = TRUE, cache = TRUE}
-needed_data <- all_data %>% select(-icon, -(tempi:irri_pvgis_mod))
-colnames(needed_data) <- c("measurementId", "place", "model", "brand", "latitude","longitude", "age", "year", "day", "hour", "date", "temperature", "radiation", "pressure", "windspeed", "humidity", "dewpoint", "bearing", "cloudcover", "energy")
+```{r columnNames, echo = TRUE}
+needed_data <- all_data %>% select(-icon)
+colnames(needed_data) <- c("measurementId", "place", "model", "brand", "latitude","longitude", "age", "year", "day", "hour", "date", "temperature", "radiation", "pressure", "windspeed", "humidity", "dewpoint", "bearing", "cloudcover", "temp_param", "radiation_param", "pressure_param", "wind_param", "humidity_param", "dewpoint_param","bearing_param", "cloud_param", "distance", "altitude", "azimuth", "altitude_param", "azimuth_param","pcnm1", "pcnm2", "pcnm3", "pcnm4", "pcnm5", "pcnm6", "pcnm7", "pcnm8", "pcnm9", "pcnm10", "pcnm11", "pcnm12", "pcnm13", "pcnm14", "pcnm15", "mode", "mode_param","energy")
 needed_data$only_day <- as.numeric(format(as.POSIXct(factor(needed_data$date),format="%m/%d/%Y %H:%M"),"%d"))
 needed_data$only_month <- as.numeric(format(as.POSIXct(factor(needed_data$date),format="%m/%d/%Y %H:%M"),"%m"))
 needed_data$only_hour <- as.numeric(format(as.POSIXct(factor(needed_data$date),format="%m/%d/%Y %H:%M"),"%H"))
 needed_data$place_string <- paste("place: ", as.character(needed_data$place))
+needed_data$date_posix <- as.POSIXct(as.character(needed_data$date), format="%m/%d/%Y %H:%M")
 ```
 
 ##Uzupełnienie zerowych wartości
 ###Wyodrębnienie modeli, marek oraz umiejscowienia czujników
-W zbiorze występują dane dla 17 różnych lokalizacji. Lokalizację okreś
+W zbiorze występują dane dla 17 różnych lokalizacji.
 ```{r uniqueValues, echo = TRUE, cache = TRUE}
 idbrands_with_models <- unique(needed_data[c("brand", "model")])
 idmodels <- unique(needed_data$model)
@@ -53,10 +54,12 @@ idplaces <- unique(needed_data$place)
 gps <- unique(needed_data[c("latitude", "longitude")])
 gps_with_places_id <- unique(needed_data[c("latitude", "longitude", "place")])
 ```
+###Analiza uzupełnienia wartości
+Przed dokonaniem wyliczenia wartości pustych warto zauważyć, że w zbiorze występuje 78521 wierszy, które posiadają wyprodukowaną energię na poziomie 0, 78489 wierszy, które posiadają zmierzony poziom nasłonecznienia na poziomie 0 oraz 72864 wierszy, które posiadają obie wspomniane wartości na poziomie 0. KIerując się tymi obserwacjami, możemy dostrzec, że w przypadku 6 tys wierszy, które mają nasłonecznienie na poziomie 0 oraz energie większą niż 0 mogła nastąpić awaria czujnika nasłonecznienia, natomiast w przypadku wierszy, które mają nasłonecznienie większe od 0, awarię urządzenia dokonującego pomiaru wyprodukowanej energii.
 
 ###Ciśnienie
 Ze względu na to, że w zbiorze występują dla cisnienia (pressure) tylko wartości zerowe albo większe niż 0.7, uznano, że zerowe wartości są wynikiem awarii czujników i zastąpiono je średnią niezerowych wartości ciśnienia dla określonej lokalizacji. Jeśli wystąpiłaby sytuacja, że dla danej lokalizacji nie byłoby żadnego pomiaru ciśnienia to wartości zerowe zastępowane sa średnią ciśnienia dla wszystkich lokalizacji.
-```{r pressure, echo = TRUE, cache=TRUE}
+```{r pressure, echo = TRUE}
 empty_values <- needed_data %>% filter(pressure == 0)
 not_empty_values <- needed_data %>% filter(pressure > 0)
 for(idplace in idplaces) {
@@ -76,9 +79,9 @@ for(idplace in idplaces) {
 ```
 
 ###Nasłonecznienie
-Założono, że w nocy nasłonecznienie wynosi 0, stąd zastapiono tylko wartości zerowe dla nasłonecznienia (radiation) z przediału godzinnego <6;18>. Wartości zerowe zastąpiono średnią wartościa parametru dla danej lokalizacji w danym miesiącu o danej godzinie.
-```{r radiation, echo = TRUE, cache=TRUE}
-empty_values <- needed_data %>% filter(radiation == 0 & only_hour > 5 & only_hour  < 19)
+Założono, że w nocy nasłonecznienie wynosi 0, stąd zastapiono tylko wartości zerowe dla nasłonecznienia (radiation) oraz wyprodukowaną energią większą niż 0 z przediału godzinnego <6;18>. Wartości zerowe zastąpiono średnią wartościa parametru dla danej lokalizacji w danym miesiącu o danej godzinie.
+```{r radiation, echo = TRUE}
+empty_values <- needed_data %>% filter(radiation == 0 & only_hour > 5 & only_hour  < 19 & energy > 0)
 not_empty_values <- needed_data %>% filter(radiation > 0 & only_hour > 5 & only_hour  < 19)
 for(idplace in idplaces) {
   empty_radiation <- empty_values %>% filter(place == idplace)
@@ -102,7 +105,43 @@ for(idplace in idplaces) {
 
 #Podstawowe statystyki
 ```{r}
-knitr::kable(summary(needed_data))
+paste("Rozmiar zbioru: ", as.character(nrow(needed_data)))
+```
+
+```{r stat, message=FALSE, warning=FALSE}
+col_names <- c("Średnia", "Wartość minimalna", "Wartość maksymalna", "Odchylenie standardowe", "Liczba zerowych wartości", "1. kwartyl", "2. kwartyl", "3. kwartyl")
+summary_data <- needed_data %>% select(-date, -date_posix, -place, -brand, -latitude, -longitude, -day, -measurementId, -model, -hour, -year, -only_day, -only_hour, -only_month, -place_string)
+row_names <- colnames(summary_data)
+summary_tab <- data_frame()
+for(i in 1:length(row_names)) {
+  column_values <- summary_data %>% select(row_names[i])
+  summary_tab[i,1] <- mean(column_values[,1])
+  summary_tab[i,2] <- min(column_values[,1])
+  summary_tab[i,3] <- max(column_values[,1])
+  summary_tab[i,4] <- sd(column_values[,1])
+  summary_tab[i,5] <- sum(column_values[,1] == 0)
+  summary_tab[i,6] <- quantile(column_values[,1], 0.25)
+  summary_tab[i,7] <- quantile(column_values[,1], 0.50)
+  summary_tab[i,8] <- quantile(column_values[,1], 0.75)
+}
+rownames(summary_tab) <- row_names
+colnames(summary_tab) <- col_names
+knitr::kable(summary_tab)
+
+summary_data <- needed_data %>% select(place, brand, latitude, longitude, day, hour, measurementId, model, year)
+col_names <- c("Wartość minimalna", "Wartość maksymalna", "Liczba unikalnych wartości")
+row_names <- colnames(summary_data)
+summary_tab <- data_frame()
+for(i in 1:length(row_names)) {
+  column_values <- summary_data %>% select(row_names[i])
+  summary_tab[i,1] <- min(column_values[,1])
+  summary_tab[i,2] <- max(column_values[,1])
+  column_unique <- unique(column_values[,1])
+  summary_tab[i,3] <- length(column_unique)
+}
+rownames(summary_tab) <- row_names
+colnames(summary_tab) <- col_names
+knitr::kable(summary_tab)
 ```
 
 #<a name="correlation"></a>
@@ -111,15 +150,69 @@ knitr::kable(summary(needed_data))
 #<a name="correlation_matrix"></a>
 ##Macierz korelacji wszystkich parametrów
 
-```{r}
-matrix_data <- needed_data %>% select(-year, -date, -only_day, -only_month, -only_hour, -place_string)
+```{r, fig.height = 8, fig.width = 11, fig.align = "left"}
+matrix_data <- needed_data %>% select(-year, -date, -date_posix, -only_day, -only_month, -only_hour, -place_string, -measurementId)
 M<-cor(matrix_data)
-corrplot(M, type="upper", order="hclust", tl.col="black", tl.srt=45)
+
+plot_ly(z = M,
+        colorscale= c("Red","White", "Blue"),
+        name = "Macierz korelacji",
+        x = rownames(M),
+        y = colnames(M),
+        type = "heatmap") %>%
+  layout(xaxis=list(
+   title = "",
+   zeroline = FALSE,
+   showline = FALSE,
+   showticklabels = TRUE,
+   showgrid = FALSE
+  ),yaxis=list(
+    title = "",
+    zeroline = FALSE,
+    showline = FALSE,
+    showticklabels = TRUE,
+    showgrid = FALSE
+  ),legend=list(
+    font = list(
+  family = "sans-serif",
+  size = 12
+  ),
+  title = "Macierz korelacji"
+))
 ```
 
+
 #<a name="correlation_energy_parameter"></a>
-##Korelacja wybranych parametrów
-```{r wykresy, message = FALSE}
-plots_data <- needed_data %>% select(-measurementId, -brand, -longitude, -latitude, -year, -date, -only_day, -only_month, -only_hour)
-plot_ly(data = plots_data, x = ~radiation, y = ~energy, color = ~place_string, colors = "Set1", visible = "legendonly")
+#Wykresy
+```{r wykresy, message = FALSE, fig.height = 8, fig.width = 11, fig.align = "left"}
+plots_data <- needed_data %>% select(-measurementId, -brand, -longitude, -latitude, -year, -only_day, -only_month, -only_hour)
+plot_ly(data = plots_data, x = ~radiation, y = ~energy, color = ~place_string, colors = "Set1", visible = "legendonly", mode = 'markers') %>%
+  layout(
+    title = "Wykres zależności wyprodukowanej energii od naświetlenia",
+    scene = list(
+      xaxis = list(title = "Naświetlenie"),
+      yaxis = list(title = "Energia")
+    ))
+```
+
+```{r, message=FALSE, fig.height = 8, fig.width = 11, fig.align = "left"}
+plot_ly(data = plots_data, x = ~humidity, y = ~energy, color = ~place_string, colors = "Set1", visible = "legendonly", mode = 'markers') %>%
+  layout(
+    title = "Wykres zależności wyprodukowanej energii od wilgotności",
+    scene = list(
+      xaxis = list(title = "Wilgotność"),
+      yaxis = list(title = "Energia")
+    ))
+```
+
+#Zmiana wytwarzanej energii w czasie
+
+```{r, message=FALSE, fig.height = 8, fig.width = 11, fig.align = "left"}
+plot_ly(data = plots_data, x = ~date_posix, y = ~energy, color = ~place_string, colors = "Set1", visible = "legendonly", type="bar") %>%
+  layout(
+    title = "Wykres zależności wyprodukowanej energii od czasu",
+    scene = list(
+      xaxis = list(title = "Czas"),
+      yaxis = list(title = "Energia")
+    ))
 ```
