@@ -1,6 +1,8 @@
 ---
 title: "Elektrownie"
-output: html_document
+output: 
+  html_document:
+    toc: yes
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 author: "Agnieszka Szymborska"
 ---
@@ -8,14 +10,10 @@ author: "Agnieszka Szymborska"
 ```{r setup, include=FALSE, echo = FALSE}
 knitr::opts_chunk$set(echo = FALSE)
 ```
-
-# Spis treści
-1. [Wczytywanie danych](#load)
-2. [Przetwarzanie danych](#prepare_data)
-3. [Korelacja](#correlation)
-    1. [Korelacja wybranych parametrów](#correlation_energy_parameter)
-    2. [Macierz korelacji](#correlation_matrix)
   
+#Wstęp
+Analizie poddano dane pozyskane z 17 paneli fotowoltaicznych, znajdujących się w 14 lokalizacjach w 3 różnych elektrowniach we Włoszech. Dane gromadzone były od 2 stycznia 2012 roku do 31 grudnia 2013 roku w godzinach 2:00-20:00. Ze względu na pomiary parametrów środowiska takich jak np. wilgotność, temperatura, ciśnienie, nasłonecznienie itd. w zbiorze występowały wartości zerowe, wynikające z awarii sensorów pomiarowych. Wszystkie wartości atrybutów oprócz dat zostały znormalizowane. W zbiorze oprócz zmierzonych wartości znajdowały się współczynniki różnych parametrów, co wskazuje, że dane te już zostały częściowo przetworzone. Celem analizy jest wskazanie atrybutów najbardziej wpływających na liczbę kWh wyprodukowanej energii. W tym celu skorzystano z macierzy korelacji. Odkryto, że najsilniej skorelowane z produkowaną energią są stopień nasłonecznienia, wilgotność, wyliczony już w zbiorze współczynnik nasłonecznienia oraz niezidentyfikowany atrybut oryginalnegoi zbioru irr_pvgis_mod [mode], który prawdopodobnie także jest jakimś współczynnikiem wyliczonym na podstawie wartości nasłonecznienia. Biorąc pod uwagę, że wilgotność jest silnie ujemnie skorelowana z nasłonecznienie (im większe nasłonecznienie tym mniejsza wilgotność, im większa wilgotność tym mniejsze nasłonecznienie) stwierdzono, że największy wpływ na ilość wyprodukowanej energii ma nasłonecznienie, natomiast pozostałe parametry są mało istotne. Przy konstrukcji modelu predykcji, jednak nie można pominąć wilgotności, ponieważ czujniki dokonujące pomiaru wilgotności prawdopodobnie nigdy nie uległy awarii (brak wartości zerowych w zbiorze), w przeciwieństwie do czujników nasłonecznienia. Analizując wartości wyprodukowanej energii w czasie, możemy dostrzec, że część elektrowni miała w niektórych miesiącach wartość produkcji prawie na poziomie zerowym np. styczeń 2013 dla paneli o id 0.05, 0.075, 0.025, 0.425. Nie wiadomo czy taka sytuacja wynika z awarii czujników produkowanej energii czy częściowego wyłączenia panelu na ten okres. Do wykonania regresora wykorzystano atrybuty adiation, himidity, mode, radiation_param, altitude oraz place wraz z algorytmem Random Forest (ze względu na najniższy wynik metryki RMSE w stosunko do pozostałych badanych algorytmów). Dla algorytnu Random Forest przy uzyciu biblioteki caret z parametrem ntree wartości 30 przy  uzyskano wartość metryki RMSE dla zbioru uczącego 0.07013931 oraz 0.06772695 dla zbioru testowego przy podziale zbioru w 75% na uczący oraz 25% na testowy.
+
 #Ładowanie bibliotek
 ```{r loadLibrary, echo = TRUE, message = FALSE}
 library(dplyr)
@@ -23,73 +21,106 @@ library(ggplot2)
 library('corrplot')
 library(caret)
 library(plotly)
+library(tidyr)
 ```
-#<a name="load"></a>
+
 #Wczytywanie danych z pliku
 ```{r summariseData, echo=TRUE, cache=TRUE}
 all_data <- read.csv(file="elektrownie.csv", header=TRUE, sep=",")
 ```
 
-#<a name="prepare_data"></a>
 #Kod przetwarzający dane
 ##Zmiana nazw kolumn
-```{r columnNames, echo = TRUE}
-needed_data <- all_data %>% select(-icon)
-colnames(needed_data) <- c("measurementId", "place", "model", "brand", "latitude","longitude", "age", "year", "day", "hour", "date", "temperature", "radiation", "pressure", "windspeed", "humidity", "dewpoint", "bearing", "cloudcover", "temp_param", "radiation_param", "pressure_param", "wind_param", "humidity_param", "dewpoint_param","bearing_param", "cloud_param", "distance", "altitude", "azimuth", "altitude_param", "azimuth_param","pcnm1", "pcnm2", "pcnm3", "pcnm4", "pcnm5", "pcnm6", "pcnm7", "pcnm8", "pcnm9", "pcnm10", "pcnm11", "pcnm12", "pcnm13", "pcnm14", "pcnm15", "mode", "mode_param","energy")
+Ze względu na wykorzystanie języka włoskiego do opisu kolumn lub nieintuicyjnych nazw zdecydowano się na zmianę nazw kolumn.
+```{r columnNames, echo = TRUE, cache = TRUE}
+needed_data <- all_data 
+colnames(needed_data) <- c("measurementId", "place", "model", "brand", "latitude","longitude", "age", "year", "day", "hour", "date", "temperature", "radiation", "pressure", "windspeed", "humidity", "icon" , "dewpoint", "bearing", "cloudcover", "temp_param", "radiation_param", "pressure_param", "wind_param", "humidity_param", "dewpoint_param","bearing_param", "cloud_param", "distance", "altitude", "azimuth", "altitude_param", "azimuth_param","pcnm1", "pcnm2", "pcnm3", "pcnm4", "pcnm5", "pcnm6", "pcnm7", "pcnm8", "pcnm9", "pcnm10", "pcnm11", "pcnm12", "pcnm13", "pcnm14", "pcnm15", "mode", "mode_param","energy")
+```
+
+W celu łatwiejszego porównywania dat w poszczególnych wierszach (pomiarach) do zbioru dodano 4 kolumny:
+  1. only_month - kolumna typu numeric, zawiera informacje o miesiącu, wartości od 1 do 12,
+  2. only_day - kolumna typu numeric, zawiera informacje o dniu miesiąca, wartości od 1 do 31,
+  3. only_hour - kolumna typu numeric, zawiera informacje o godzinie (bez minut), wartości od 2 do 20,
+  4. date_posix - kolumna typu POSIXct, zawiera datę w formacie umożliwiiającym łatwe porównywanie dat.
+Dodatkowo dodano kolumne place_string zawierającą zagregowane informacje o lokalizacji danego panelu 
+
+```{r addColumns, echo = TRUE, cache = TRUE}
 needed_data$only_day <- as.numeric(format(as.POSIXct(factor(needed_data$date),format="%m/%d/%Y %H:%M"),"%d"))
 needed_data$only_month <- as.numeric(format(as.POSIXct(factor(needed_data$date),format="%m/%d/%Y %H:%M"),"%m"))
 needed_data$only_hour <- as.numeric(format(as.POSIXct(factor(needed_data$date),format="%m/%d/%Y %H:%M"),"%H"))
-needed_data$place_string <- paste("place: ", as.character(needed_data$place))
 needed_data$date_posix <- as.POSIXct(as.character(needed_data$date), format="%m/%d/%Y %H:%M")
+needed_data$place_string <- paste("Wsp: ", as.character(needed_data$latitude), " ",as.character(needed_data$longitude), " Panel: ", as.character(needed_data$place))
 ```
 
 ##Uzupełnienie zerowych wartości
 ###Wyodrębnienie modeli, marek oraz umiejscowienia czujników
-W zbiorze występują dane dla 17 różnych lokalizacji.
-```{r uniqueValues, echo = TRUE, cache = TRUE}
-idbrands_with_models <- unique(needed_data[c("brand", "model")])
-idmodels <- unique(needed_data$model)
+W zbiorze występują dane dla 17 różnych paneli słonecznych znajdujących się w 14 różnych lokalizacji w 3 różnych elektrowniach.
+
+####Marki
+
+```{r uniqueValues4, echo = TRUE}
 idbrands <- unique(needed_data$brand)
-idplaces <- unique(needed_data$place)
-gps <- unique(needed_data[c("latitude", "longitude")])
-gps_with_places_id <- unique(needed_data[c("latitude", "longitude", "place")])
+idbrands
+paste("Liczba unikalnych marek paneli: ", length(idbrands))
 ```
+
+####Modele paneli
+
+```{r uniqueValues, echo = TRUE}
+idbrands_with_models <- unique(needed_data[c("brand", "model")])
+idbrands_with_models
+paste("Liczba unikalnych modeli paneli: ", length(idbrands_with_models))
+```
+
+
+####Identyfikatory paneli
+```{r uniqueValues5, echo = TRUE}
+idplaces <- unique(needed_data$place)
+idplaces
+paste("Liczba paneli: ", length(idplaces))
+```
+
+####Lokalizacje
+```{r uniqueValues6, echo = TRUE}
+gps <- unique(needed_data[c("latitude", "longitude")])
+gps
+paste("Liczba unikalnych lokalizacji: ", length(gps))
+```
+
+####Lokalizacja wraz z identyfikatorem panelu
+```{r uniqueValues7, echo = TRUE}
+gps_with_places_id <- unique(needed_data[c("latitude", "longitude", "place")])
+gps_with_places_id
+```
+
 ###Analiza uzupełnienia wartości
-Przed dokonaniem wyliczenia wartości pustych warto zauważyć, że w zbiorze występuje 78521 wierszy, które posiadają wyprodukowaną energię na poziomie 0, 78489 wierszy, które posiadają zmierzony poziom nasłonecznienia na poziomie 0 oraz 72864 wierszy, które posiadają obie wspomniane wartości na poziomie 0. KIerując się tymi obserwacjami, możemy dostrzec, że w przypadku 6 tys wierszy, które mają nasłonecznienie na poziomie 0 oraz energie większą niż 0 mogła nastąpić awaria czujnika nasłonecznienia, natomiast w przypadku wierszy, które mają nasłonecznienie większe od 0, awarię urządzenia dokonującego pomiaru wyprodukowanej energii.
+Przed dokonaniem wyliczenia wartości pustych warto zauważyć, że w zbiorze występuje 78521 wierszy, które posiadają wyprodukowaną energię na poziomie 0, 78489 wierszy, które posiadają zmierzony poziom nasłonecznienia na poziomie 0 oraz 72864 wierszy, które posiadają obie wspomniane wartości na poziomie 0. Kierując się tymi obserwacjami, możemy dostrzec, że w przypadku prawie 6 tys. wierszy, które mają nasłonecznienie na poziomie 0 oraz energie większą niż 0 mogła nastąpić awaria czujnika nasłonecznienia, natomiast w przypadku wierszy, które mają nasłonecznienie większe od 0, a wyprodukowaną energię na poziomie 0, elektrownia mogła zostać wyłączona (czujnik dokonywał ciągle pomiarów parametrów środowiska) lub niepoprwnie zapisano liczbę kwh wyprodukowanej energii.
 
 ###Ciśnienie
-Ze względu na to, że w zbiorze występują dla cisnienia (pressure) tylko wartości zerowe albo większe niż 0.7, uznano, że zerowe wartości są wynikiem awarii czujników i zastąpiono je średnią niezerowych wartości ciśnienia dla określonej lokalizacji. Jeśli wystąpiłaby sytuacja, że dla danej lokalizacji nie byłoby żadnego pomiaru ciśnienia to wartości zerowe zastępowane sa średnią ciśnienia dla wszystkich lokalizacji.
+Ze względu na to, że w zbiorze występują dla cisnienia (pressure) tylko wartości zerowe albo większe niż 0.7, uznano, że zerowe wartości są wynikiem awarii czujników i zastąpiono je średnią niezerowych wartości ciśnienia dla określonej lokalizacji.
 ```{r pressure, echo = TRUE}
-empty_values <- needed_data %>% filter(pressure == 0)
-not_empty_values <- needed_data %>% filter(pressure > 0)
 for(idplace in idplaces) {
-  empty_pressure <- empty_values %>% filter(place == idplace)
-  pressure_column <- not_empty_values %>% filter(place == idplace) %>% select(pressure)
-  average_value <- mean(pressure_column$pressure)
-  if(is.na(average_value)) {
-    pressure_column <- not_empty_values %>% select(pressure)
-    average_value <- mean(pressure_column$pressure)
-  }
-  for(i in 1:nrow(empty_pressure)) {
-    row <- empty_pressure[i, ]
-      needed_data$pressure[which(needed_data$measurementId == row$measurementId)] <- average_value
+  average_value <- mean(needed_data$pressure[needed_data$pressure > 0 & needed_data$place == idplace])
+  if(!is.na(average_value)) {
+    needed_data$pressure[needed_data$pressure == 0 & needed_data$place == idplace] <- average_value
   }
 }
 
 ```
 
 ###Nasłonecznienie
-Założono, że w nocy nasłonecznienie wynosi 0, stąd zastapiono tylko wartości zerowe dla nasłonecznienia (radiation) oraz wyprodukowaną energią większą niż 0 z przediału godzinnego <6;18>. Wartości zerowe zastąpiono średnią wartościa parametru dla danej lokalizacji w danym miesiącu o danej godzinie.
-```{r radiation, echo = TRUE}
-empty_values <- needed_data %>% filter(radiation == 0 & only_hour > 5 & only_hour  < 19 & energy > 0)
-not_empty_values <- needed_data %>% filter(radiation > 0 & only_hour > 5 & only_hour  < 19)
+Założono, że w nocy nasłonecznienie wynosi 0 (co wynika również z analizy pozyskanych danych), stąd zastapiono tylko wartości zerowe dla nasłonecznienia (radiation) z przediału godzinnego <5;20> oraz wyprodukowaną energią większą niż 0. Wartości zerowe zastąpiono średnią wartościa parametru dla danego czujnika w danym miesiącu o danej godzinie.
+
+```{r radiation, echo = TRUE, cache = TRUE}
+empty_values <- needed_data %>% filter(radiation == 0 & only_hour > 4 & only_hour  < 20 & energy > 0)
+not_empty_values <- needed_data %>% filter(radiation > 0 & only_hour > 4 & only_hour  < 20)
 for(idplace in idplaces) {
   empty_radiation <- empty_values %>% filter(place == idplace)
   if(nrow(empty_radiation) > 0) {
     for(i in 1:nrow(empty_radiation)) {
       row <- empty_radiation[i, ]
-      cloudcover_low <- row$cloudcover - 0.1
-      cloudcover_up <- row$cloudcover + 0.1
+      cloudcover_low <- row$cloudcover - 0.2
+      cloudcover_up <- row$cloudcover + 0.2
       radiation_column <- not_empty_values %>% filter(place == idplace & only_hour == row$only_hour & only_month == row$only_month & cloudcover > cloudcover_low & cloudcover < cloudcover_up) %>% select(radiation)
       if(nrow(radiation_column) > 0) {
         average_value <- mean(radiation_column$radiation)
@@ -104,13 +135,15 @@ for(idplace in idplaces) {
 ```
 
 #Podstawowe statystyki
+Wszystkie wartości w zbiorze oprócz daty wykonania pomiaru zostały znormalizowane. Parametry możemy podzielić na niedyskretne (ze względu na nieznajomość dokładności pomiarów w okreslonym zakresie działania, np. temperatura przed dokonaniem normalizacji wartości mogła być mierzona z różną dokładnością w zakresie [x;y]) oraz dyskretne (określony zbiór wartości, np. id panelu). Stąd statystyki danego parametru przedstawiono w zależności od jego typu.
+
 ```{r}
 paste("Rozmiar zbioru: ", as.character(nrow(needed_data)))
 ```
-
+##Statystyki wartości niedsykretnych w zbiorze
 ```{r stat, message=FALSE, warning=FALSE}
 col_names <- c("Średnia", "Wartość minimalna", "Wartość maksymalna", "Odchylenie standardowe", "Liczba zerowych wartości", "1. kwartyl", "2. kwartyl", "3. kwartyl")
-summary_data <- needed_data %>% select(-date, -date_posix, -place, -brand, -latitude, -longitude, -day, -measurementId, -model, -hour, -year, -only_day, -only_hour, -only_month, -place_string)
+summary_data <- needed_data %>% select(-icon, -date, -date_posix, -place, -brand, -latitude, -longitude, -day, -measurementId, -model, -hour, -year, -only_day, -only_hour, -only_month, -place_string)
 row_names <- colnames(summary_data)
 summary_tab <- data_frame()
 for(i in 1:length(row_names)) {
@@ -127,8 +160,12 @@ for(i in 1:length(row_names)) {
 rownames(summary_tab) <- row_names
 colnames(summary_tab) <- col_names
 knitr::kable(summary_tab)
+```
 
-summary_data <- needed_data %>% select(place, brand, latitude, longitude, day, hour, measurementId, model, year)
+##Statystyki wartości dyskretnych w zbiorze
+
+```{r stat2, message=FALSE, warning=FALSE}
+summary_data <- needed_data %>% select(place, brand, latitude, longitude, day, hour, measurementId, model, year, icon)
 col_names <- c("Wartość minimalna", "Wartość maksymalna", "Liczba unikalnych wartości")
 row_names <- colnames(summary_data)
 summary_tab <- data_frame()
@@ -144,15 +181,34 @@ colnames(summary_tab) <- col_names
 knitr::kable(summary_tab)
 ```
 
-#<a name="correlation"></a>
-#Korelacja
+##Rozkłady wartości 
+W tej sekcji zostały przedstawione rozkłady wartości wybranych atrybutów niedyskretnych.
 
-#<a name="correlation_matrix"></a>
+```{r hist, message=FALSE, warning=FALSE}
+plots_data <- needed_data %>% select(-measurementId, -brand, -longitude, -latitude, -only_day, -only_hour)
+plot_ly(alpha = 0.6, visible = "legendonly") %>%
+  add_histogram(x = ~plots_data$age, name="Age") %>%
+  add_histogram(x = ~plots_data$temperature, name="Temperature") %>%
+  add_histogram(x = ~plots_data$radiation, name="Radiation") %>%
+  add_histogram(x = ~plots_data$humidity, name="Humidity") %>%
+  add_histogram(x = ~plots_data$windspeed, name="Windspeed") %>%
+  add_histogram(x = ~plots_data$dewpoint, name="Dewpoint") %>%
+  add_histogram(x = ~plots_data$bearing, name="Bearing") %>%
+  add_histogram(x = ~plots_data$cloudcover, name="Cloudcover") %>%
+  add_histogram(x = ~plots_data$energy + 1, name="Energy") %>%
+  layout(barmode = "overlay", yaxis = list(type = "log", title = "częstość"), xaxis = list(title = "parametr"))
+```
+
+#Korelacja
+Celem analizy jest znalezienie czynników, które najlepiej wpływają na ilość wyprodukowanej energii. Język statystyki takie związki nazywa korelacją. Gdy korelacja jest dodatnie to wraz ze wzrostem wartości parametru X rośnie wartość parametru Y, natomiast jeśli jest ujemna to wraz ze wzrostem wartości parametru X maleje wartość parametru Y.
+
 ##Macierz korelacji wszystkich parametrów
+Aby obliczyć współczynnik korelacji wykorzystano współczynnik korelacji liniowej Pearsona. Przyjmuje się, że jeśli współczynnik korelacji mieści się pomiędzy <-0.2;0.2> to pomiędzy parametrami X i Y nie występuje korelacja, czyli nie ma związku.
+Przeanalizowano najpierw, które parametry są najmocniej skorelowane z produkowaną energią (energy). Według przedstawionej macierzy korelacji największy dodatni wpływ na produkowaną energię ma parametr radiation, czyli promieniowanie słoneczne. Natomiast największy negatywny wpływ na produkowaną energię ma parametr humidity, czyli wilgotność. Warto tutaj zauważyć, że związek też spowodowany jest tym, że wzrost promieniowania słonecznego wpływa na zmniejszenie wilgotności, co za tym idzie jeśli wilgotność jest wysoka, to promieniowanie słoneczne ma niższą wartość. Stąd wysoka ujemna korelacja pomiędzy wilgotnością a produkowaną energią. Duży dodatni wpływ na produkowaną energię ma także parametr mode, który jest prawdopodobnie wartością obliczoną na podstawie wartości nasłonecznienia oraz wilgotności (analizując wartości korelacji dla tego parametru). Warto tutaj zauważyć, że zachmurzenie (cloudcover) nie ma praktycznie żadnego wpływu na wartość promieniowania słonecznego (współczynnik korelacji mniejszy niż 0.2).
 
 ```{r, fig.height = 8, fig.width = 11, fig.align = "left"}
 matrix_data <- needed_data %>% select(-year, -date, -date_posix, -only_day, -only_month, -only_hour, -place_string, -measurementId)
-M<-cor(matrix_data)
+M<-cor(matrix_data, method = "pearson")
 
 plot_ly(z = M,
         colorscale= c("Red","White", "Blue"),
@@ -181,19 +237,21 @@ plot_ly(z = M,
 ))
 ```
 
-
-#<a name="correlation_energy_parameter"></a>
 #Wykresy
+Na podstawie macierzy korelacji wybrano najciekawsze związki i przedstawiono je na wykresach, osobno dla każdego panelu.
+
+##Wykres zależności wyprodukowanej energii od promieniowania słonecznego
 ```{r wykresy, message = FALSE, fig.height = 8, fig.width = 11, fig.align = "left"}
-plots_data <- needed_data %>% select(-measurementId, -brand, -longitude, -latitude, -year, -only_day, -only_month, -only_hour)
 plot_ly(data = plots_data, x = ~radiation, y = ~energy, color = ~place_string, colors = "Set1", visible = "legendonly", mode = 'markers') %>%
   layout(
-    title = "Wykres zależności wyprodukowanej energii od naświetlenia",
+    title = "Wykres zależności wyprodukowanej energii od promieniowania słonecznego",
     scene = list(
-      xaxis = list(title = "Naświetlenie"),
+      xaxis = list(title = "Nasłonecznienie"),
       yaxis = list(title = "Energia")
     ))
 ```
+
+##Wykres zależności wyprodukowanej energii od wilgotności
 
 ```{r, message=FALSE, fig.height = 8, fig.width = 11, fig.align = "left"}
 plot_ly(data = plots_data, x = ~humidity, y = ~energy, color = ~place_string, colors = "Set1", visible = "legendonly", mode = 'markers') %>%
@@ -205,14 +263,130 @@ plot_ly(data = plots_data, x = ~humidity, y = ~energy, color = ~place_string, co
     ))
 ```
 
+##Wykres zależności wyprodukowanej energii od parametru mode
+
+```{r, message=FALSE, fig.height = 8, fig.width = 11, fig.align = "left"}
+plot_ly(data = plots_data, x = ~mode, y = ~energy, color = ~place_string, colors = "Set1", visible = "legendonly", mode = 'markers') %>%
+  layout(
+    title = "Wykres zależności wyprodukowanej energii od parametru mode",
+    scene = list(
+      xaxis = list(title = "Mode"),
+      yaxis = list(title = "Energia")
+    ))
+```
+
+##Wykres zależności wilgotności od nasłonecznienia
+
+```{r, message=FALSE, fig.height = 8, fig.width = 11, fig.align = "left"}
+plot_ly(data = plots_data, x = ~radiation, y = ~humidity, color = ~place_string, colors = "Set1", visible = "legendonly", mode = 'markers') %>%
+  layout(
+    title = "Wykres zależności wilgotności od nasłonecznienia",
+      xaxis = list(title = "Nasłonecznienie"),
+      yaxis = list(title = "Wilgotność"))
+```
+
 #Zmiana wytwarzanej energii w czasie
+##Zmiana wytwarzanej energii w czasie w ujęciu godzinowym dla każdego panelu
+Na przedstawionym wykresie dla niektórych paneli (id 0.05, 0.075, 0.025, 0.425) można zauważyć problem zerowych wartości produkowanej energii, który analizowano wcześniej. Nie zostało stwierdzone, czy w miesiącach, w których wyprodukowana energia jest na niskim poziomie lub zerowym jesy wynikiem błędów pomiarowych czy nieprodukowaniem energii przez elektrownie. Dla lepszej czytelność wykresów w nastepnym punkcie zostanie przedstawiony wykres wyprodukowanej energii przez poszczególne panele w ujęciu miesięcznym.
 
 ```{r, message=FALSE, fig.height = 8, fig.width = 11, fig.align = "left"}
 plot_ly(data = plots_data, x = ~date_posix, y = ~energy, color = ~place_string, colors = "Set1", visible = "legendonly", type="bar") %>%
   layout(
     title = "Wykres zależności wyprodukowanej energii od czasu",
-    scene = list(
-      xaxis = list(title = "Czas"),
-      yaxis = list(title = "Energia")
-    ))
+    xaxis = list(title = "Czas"),
+    yaxis = list(title = "Energia")
+    )
+```
+
+##Zmiana wytwarzanej energii w czasie w ujęciu miesięcznym dla każdego panelu
+Na podstawie wykresu wyprodukowanej energii w ujęciu miesięcznym przez panele możemy zaobserwować różnice w wyprodukowanej energii w zależności od pory roku. W miesiącach wiosennych i letnich wartości te są zdecydowanie wyższe niż w jesiennych i zimowych, co wskazuje na ogromy wpływ nasłonecznienia na wyprodukowaną energię.
+
+```{r, message=FALSE, fig.height = 12, fig.width = 11, fig.align = "left"}
+plots_data$date_month <- as.character(as.POSIXct(as.character(plots_data$date), format="%m/%d/%Y %H:%M"), format="%Y/%m")
+month_plots_data <- plots_data %>% group_by(year, only_month, place_string, date_month) %>% summarize(month_energy = sum(energy))
+plot_ly(data = month_plots_data, x = ~date_month, y = ~month_energy, color = ~place_string, colors = "Set1", visible = "legendonly", type="bar") %>%
+  layout(
+    title = "Wykres zależności wyprodukowanej energii od czasu",
+    xaxis = list(title = "Czas"),
+    yaxis = list(title = "Energia")
+    )
+```
+
+
+#Regresor
+Na podstawie macierzy korelacji zdecydowano się wybrać atrybuty radiation, himidity, mode, radiation_param, altitude oraz place (ze względu na konieczność rozróżniania paneli). Zastosowano 3 różne algorytmy: Random Forest, Bayesian Regularized Neural Networks oraz Neural Network (method neuralnet). Tutaj warto wspomnieć, że pomimo, że atrybut radiation jest skorelowany z atrybutem humidity, to oba te atrybuty wpływają na skuteczność regresora. W momencie wykorzystania algorytmu  Random Forest dla ntree = 10, wartość miary RMSE modelu wykorzystującego atrybuty radiation, himidity, mode, radiation_param, altitude oraz place była o 0.002 mniejsza niż modelu radiation, mode, radiation_param, altitude oraz place. Może to wynikać z faktu, że na podstawie rozkładu wartości można zauważyć, że czujnik wilgotności ani razu nie wskazał wartości zerowej (prawdopodobnie nie uległ nigdy awarii), natomiast czujnik nasłonecznienia miał stosunkowo dużo wartości zerowych (nie wynikających z nocnej pory). Stąd warto zastosować parametr humidity, ze względu na silną korelację z radiation, która jest silnie skorelowana z atrybutem energy (wyprodukowaną energią).
+
+##Random Forest
+
+```{r trainingSetrf30, echo=TRUE, cache = TRUE}
+set.seed(1)
+training_data <- needed_data
+inTraining <- 
+    createDataPartition(
+        y = training_data$energy,
+        p = .75,
+        list = FALSE)
+
+training <- training_data[ inTraining,]
+testing  <- training_data[-inTraining,]
+```
+
+```{r trainingSetrf30, echo=TRUE, cache = TRUE}
+set.seed(1)
+ctrl <- trainControl(
+    method = "repeatedcv",
+    number = 2,
+    repeats = 5)
+	
+fit <- train(energy ~ radiation + humidity + mode + radiation_param + altitude +  place,
+             data = training,
+             method = "rf",
+	     metric = "RMSE",
+             trControl = ctrl, 
+		ntree = 30)
+fit
+```
+
+```{r predictSetrf30, echo=TRUE, cache = TRUE}
+pred <- predict(modellist$'10', newdata = testing)
+dat <- data.frame(obs =  testing$energy,
+                  pred = pred)
+defaultSummary(dat)
+```
+
+##Bayesian Regularized Neural Networks
+
+```{r trainingSetbrnn30, echo=TRUE, cache = TRUE}
+set.seed(1)
+training_data <- needed_data
+inTraining <- 
+    createDataPartition(
+        y = training_data$energy,
+        p = .75,
+        list = FALSE)
+
+training <- training_data[ inTraining,]
+testing  <- training_data[-inTraining,]
+```
+
+```{r trainingSetbrnn30, echo=TRUE, cache = TRUE}
+set.seed(1)
+ctrl <- trainControl(
+    method = "repeatedcv",
+    number = 2,
+    repeats = 5)
+	
+fit <- train(energy ~ radiation + humidity + mode + radiation_param + altitude +  place,
+             data = training,
+             method = "brnn",
+	     metric = "RMSE",
+             trControl = ctrl)
+fit
+```
+
+```{r predictSetbrnn30, echo=TRUE, cache = TRUE}
+pred <- predict(fit, newdata = testing)
+dat <- data.frame(obs =  testing$energy,
+                  pred = pred)
+defaultSummary(dat)
 ```

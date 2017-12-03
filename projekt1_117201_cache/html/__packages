@@ -1,0 +1,9 @@
+base
+dplyr
+tidyr
+ggplot2
+corrplot
+lattice
+caret
+bindrcpp
+plotly
