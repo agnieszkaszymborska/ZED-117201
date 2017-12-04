@@ -7,3 +7,7 @@ lattice
 caret
 bindrcpp
 plotly
+randomForest
+Formula
+brnn
+nnet

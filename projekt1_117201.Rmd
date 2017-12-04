@@ -3,6 +3,8 @@ title: "Elektrownie"
 output: 
   html_document:
     toc: yes
+    keep_md: yes
+    
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 author: "Agnieszka Szymborska"
 ---
@@ -12,7 +14,7 @@ knitr::opts_chunk$set(echo = FALSE)
 ```
   
 #Wstęp
-Analizie poddano dane pozyskane z 17 paneli fotowoltaicznych, znajdujących się w 14 lokalizacjach w 3 różnych elektrowniach we Włoszech. Dane gromadzone były od 2 stycznia 2012 roku do 31 grudnia 2013 roku w godzinach 2:00-20:00. Ze względu na pomiary parametrów środowiska takich jak np. wilgotność, temperatura, ciśnienie, nasłonecznienie itd. w zbiorze występowały wartości zerowe, wynikające z awarii sensorów pomiarowych. Wszystkie wartości atrybutów oprócz dat zostały znormalizowane. W zbiorze oprócz zmierzonych wartości znajdowały się współczynniki różnych parametrów, co wskazuje, że dane te już zostały częściowo przetworzone. Celem analizy jest wskazanie atrybutów najbardziej wpływających na liczbę kWh wyprodukowanej energii. W tym celu skorzystano z macierzy korelacji. Odkryto, że najsilniej skorelowane z produkowaną energią są stopień nasłonecznienia, wilgotność, wyliczony już w zbiorze współczynnik nasłonecznienia oraz niezidentyfikowany atrybut oryginalnegoi zbioru irr_pvgis_mod [mode], który prawdopodobnie także jest jakimś współczynnikiem wyliczonym na podstawie wartości nasłonecznienia. Biorąc pod uwagę, że wilgotność jest silnie ujemnie skorelowana z nasłonecznienie (im większe nasłonecznienie tym mniejsza wilgotność, im większa wilgotność tym mniejsze nasłonecznienie) stwierdzono, że największy wpływ na ilość wyprodukowanej energii ma nasłonecznienie, natomiast pozostałe parametry są mało istotne. Przy konstrukcji modelu predykcji, jednak nie można pominąć wilgotności, ponieważ czujniki dokonujące pomiaru wilgotności prawdopodobnie nigdy nie uległy awarii (brak wartości zerowych w zbiorze), w przeciwieństwie do czujników nasłonecznienia. Analizując wartości wyprodukowanej energii w czasie, możemy dostrzec, że część elektrowni miała w niektórych miesiącach wartość produkcji prawie na poziomie zerowym np. styczeń 2013 dla paneli o id 0.05, 0.075, 0.025, 0.425. Nie wiadomo czy taka sytuacja wynika z awarii czujników produkowanej energii czy częściowego wyłączenia panelu na ten okres. Do wykonania regresora wykorzystano atrybuty adiation, himidity, mode, radiation_param, altitude oraz place wraz z algorytmem Random Forest (ze względu na najniższy wynik metryki RMSE w stosunko do pozostałych badanych algorytmów). Dla algorytnu Random Forest przy uzyciu biblioteki caret z parametrem ntree wartości 30 przy  uzyskano wartość metryki RMSE dla zbioru uczącego 0.07013931 oraz 0.06772695 dla zbioru testowego przy podziale zbioru w 75% na uczący oraz 25% na testowy.
+Analizie poddano dane pozyskane z 17 paneli fotowoltaicznych, znajdujących się w 14 lokalizacjach w 3 różnych elektrowniach we Włoszech. Dane gromadzone były od 2 stycznia 2012 roku do 31 grudnia 2013 roku w godzinach 2:00-20:00. Ze względu na pomiary parametrów środowiska takich jak np. wilgotność, temperatura, ciśnienie, nasłonecznienie itd. dokonywane przez czujniki, które mogą ulec awarii, w zbiorze występowały wartości zerowe. Wszystkie wartości atrybutów oprócz dat zostały znormalizowane. W zbiorze obok zmierzonych wartości znajdowały się współczynniki różnych parametrów, co wskazuje, że dane te już zostały częściowo przetworzone. Celem analizy jest wskazanie atrybutów najbardziej wpływających na liczbę kWh wyprodukowanej energii. W tym celu skorzystano z macierzy korelacji. Odkryto, że najsilniej skorelowane z produkowaną energią są stopień nasłonecznienia, wilgotność, wyliczony już w zbiorze współczynnik nasłonecznienia oraz niezidentyfikowany atrybut oryginalnego zbioru irr_pvgis_mod [mode], który prawdopodobnie także jest jakimś współczynnikiem wyliczonym na podstawie wartości nasłonecznienia. Biorąc pod uwagę, że wilgotność jest silnie ujemnie skorelowana z nasłonecznienie (im większe nasłonecznienie tym mniejsza wilgotność, im większa wilgotność tym mniejsze nasłonecznienie) stwierdzono, że największy wpływ na ilość wyprodukowanej energii ma nasłonecznienie, natomiast pozostałe parametry są mało istotne. Ciekawym faktem jest to, że według macierzy korelacji godzina oraz temperatura mają niewielki wpływ na nasłonecznienie. W przypadku godziny prawdopodobnie wynika to z faktu, że analizowane dane są z całego roku, a w zależności od pory roku w danej godzinie jest zupełnie inne nasłonecznienie. W przypadku temperatury może wynikać to z faktu, że nie mamy informacji, w którym miejscu znajdował się czujnik pomiarowy, czy był on na słońcu czy w cieniu. Przy konstrukcji modelu predykcji nie można pominąć wilgotności (choć jest silnie skorelowana z nasłonecznieniem), ponieważ czujniki dokonujące pomiaru wilgotności prawdopodobnie nigdy nie uległy awarii (brak wartości zerowych w zbiorze), w przeciwieństwie do czujników nasłonecznienia. Analizując wartości wyprodukowanej energii w czasie, możemy dostrzec, że część elektrowni miała w niektórych miesiącach wartość produkcji prawie na poziomie zerowym np. styczeń 2013 dla paneli o id: 0.05, 0.075, 0.025 oraz 0.425. Nie wiadomo czy taka sytuacja wynika z awarii czujników produkowanej energii czy częściowego wyłączenia panelu na ten okres. Do wykonania regresora wykorzystano atrybuty radiation, himidity, mode, radiation_param, altitude oraz place wraz z algorytmem Random Forest (ze względu na najniższy wynik metryki RMSE w stosunko do pozostałych badanych algorytmów). Dla algorytnu Random Forest przy wykorzystaniu biblioteki caret z parametrem ntree o wartości 30 uzyskano wartość metryki RMSE dla zbioru uczącego 0.07003180 oraz 0.06831101 dla zbioru testowego przy podziale zbioru w 75% na uczący oraz 25% na testowy.
 
 #Ładowanie bibliotek
 ```{r loadLibrary, echo = TRUE, message = FALSE}
@@ -38,10 +40,10 @@ colnames(needed_data) <- c("measurementId", "place", "model", "brand", "latitude
 ```
 
 W celu łatwiejszego porównywania dat w poszczególnych wierszach (pomiarach) do zbioru dodano 4 kolumny:
-  1. only_month - kolumna typu numeric, zawiera informacje o miesiącu, wartości od 1 do 12,
-  2. only_day - kolumna typu numeric, zawiera informacje o dniu miesiąca, wartości od 1 do 31,
-  3. only_hour - kolumna typu numeric, zawiera informacje o godzinie (bez minut), wartości od 2 do 20,
-  4. date_posix - kolumna typu POSIXct, zawiera datę w formacie umożliwiiającym łatwe porównywanie dat.
+ * only_month - kolumna typu numeric, zawiera informacje o miesiącu, wartości od 1 do 12,
+ * only_day - kolumna typu numeric, zawiera informacje o dniu miesiąca, wartości od 1 do 31,
+ * only_hour - kolumna typu numeric, zawiera informacje o godzinie (bez minut), wartości od 2 do 20,
+ * date_posix - kolumna typu POSIXct, zawiera datę w formacie umożliwiiającym łatwe porównywanie dat.
 Dodatkowo dodano kolumne place_string zawierającą zagregowane informacje o lokalizacji danego panelu 
 
 ```{r addColumns, echo = TRUE, cache = TRUE}
@@ -94,10 +96,10 @@ gps_with_places_id
 ```
 
 ###Analiza uzupełnienia wartości
-Przed dokonaniem wyliczenia wartości pustych warto zauważyć, że w zbiorze występuje 78521 wierszy, które posiadają wyprodukowaną energię na poziomie 0, 78489 wierszy, które posiadają zmierzony poziom nasłonecznienia na poziomie 0 oraz 72864 wierszy, które posiadają obie wspomniane wartości na poziomie 0. Kierując się tymi obserwacjami, możemy dostrzec, że w przypadku prawie 6 tys. wierszy, które mają nasłonecznienie na poziomie 0 oraz energie większą niż 0 mogła nastąpić awaria czujnika nasłonecznienia, natomiast w przypadku wierszy, które mają nasłonecznienie większe od 0, a wyprodukowaną energię na poziomie 0, elektrownia mogła zostać wyłączona (czujnik dokonywał ciągle pomiarów parametrów środowiska) lub niepoprwnie zapisano liczbę kwh wyprodukowanej energii.
+Przed dokonaniem wyliczenia wartości pustych warto zauważyć, że w zbiorze występuje 78521 wierszy, które posiadają wyprodukowaną energię na poziomie 0, 78489 wierszy, które posiadają zmierzony poziom nasłonecznienia na poziomie 0 oraz 72864 wierszy, które posiadają obie wspomniane wartości na poziomie 0. Kierując się tymi obserwacjami, możemy dostrzec, że w przypadku prawie 6 tys. wierszy, które mają nasłonecznienie na poziomie 0 oraz energie większą niż 0 mogła nastąpić awaria czujnika nasłonecznienia, natomiast w przypadku wierszy, które mają nasłonecznienie większe od 0, a wyprodukowaną energię na poziomie 0, elektrownia mogła zostać wyłączona (czujnik dokonywał ciągle pomiarów parametrów środowiska) lub niepoprawnie zapisano liczbę kwh wyprodukowanej energii.
 
 ###Ciśnienie
-Ze względu na to, że w zbiorze występują dla cisnienia (pressure) tylko wartości zerowe albo większe niż 0.7, uznano, że zerowe wartości są wynikiem awarii czujników i zastąpiono je średnią niezerowych wartości ciśnienia dla określonej lokalizacji.
+Ze względu na to, że w zbiorze występują dla ciśnienia (pressure) tylko wartości zerowe lub większe niż 0.7, uznano, że zerowe wartości są wynikiem awarii czujników i zastąpiono je średnią niezerowych wartości ciśnienia dla określonego panelu.
 ```{r pressure, echo = TRUE}
 for(idplace in idplaces) {
   average_value <- mean(needed_data$pressure[needed_data$pressure > 0 & needed_data$place == idplace])
@@ -135,7 +137,7 @@ for(idplace in idplaces) {
 ```
 
 #Podstawowe statystyki
-Wszystkie wartości w zbiorze oprócz daty wykonania pomiaru zostały znormalizowane. Parametry możemy podzielić na niedyskretne (ze względu na nieznajomość dokładności pomiarów w okreslonym zakresie działania, np. temperatura przed dokonaniem normalizacji wartości mogła być mierzona z różną dokładnością w zakresie [x;y]) oraz dyskretne (określony zbiór wartości, np. id panelu). Stąd statystyki danego parametru przedstawiono w zależności od jego typu.
+Wszystkie wartości w zbiorze oprócz daty wykonania pomiaru zostały znormalizowane. Parametry możemy podzielić na niedyskretne (ze względu na nieznajomość dokładności pomiarów w określonym zakresie działania, np. temperatura przed dokonaniem normalizacji wartości,  mogła być mierzona z różną dokładnością w zakresie [x;y]) oraz dyskretne (określony zbiór wartości, np. id panelu). Stąd statystyki danego parametru przedstawiono w zależności od jego typu.
 
 ```{r}
 paste("Rozmiar zbioru: ", as.character(nrow(needed_data)))
@@ -200,7 +202,7 @@ plot_ly(alpha = 0.6, visible = "legendonly") %>%
 ```
 
 #Korelacja
-Celem analizy jest znalezienie czynników, które najlepiej wpływają na ilość wyprodukowanej energii. Język statystyki takie związki nazywa korelacją. Gdy korelacja jest dodatnie to wraz ze wzrostem wartości parametru X rośnie wartość parametru Y, natomiast jeśli jest ujemna to wraz ze wzrostem wartości parametru X maleje wartość parametru Y.
+Celem analizy jest znalezienie czynników, które najlepiej wpływają na ilość wyprodukowanej energii. Język statystyki takie związki nazywa korelacją. Gdy korelacja jest dodatnia to wraz ze wzrostem wartości parametru X rośnie wartość parametru Y, natomiast jeśli jest ujemna to wraz ze wzrostem wartości parametru X maleje wartość parametru Y.
 
 ##Macierz korelacji wszystkich parametrów
 Aby obliczyć współczynnik korelacji wykorzystano współczynnik korelacji liniowej Pearsona. Przyjmuje się, że jeśli współczynnik korelacji mieści się pomiędzy <-0.2;0.2> to pomiędzy parametrami X i Y nie występuje korelacja, czyli nie ma związku.
@@ -287,7 +289,7 @@ plot_ly(data = plots_data, x = ~radiation, y = ~humidity, color = ~place_string,
 
 #Zmiana wytwarzanej energii w czasie
 ##Zmiana wytwarzanej energii w czasie w ujęciu godzinowym dla każdego panelu
-Na przedstawionym wykresie dla niektórych paneli (id 0.05, 0.075, 0.025, 0.425) można zauważyć problem zerowych wartości produkowanej energii, który analizowano wcześniej. Nie zostało stwierdzone, czy w miesiącach, w których wyprodukowana energia jest na niskim poziomie lub zerowym jesy wynikiem błędów pomiarowych czy nieprodukowaniem energii przez elektrownie. Dla lepszej czytelność wykresów w nastepnym punkcie zostanie przedstawiony wykres wyprodukowanej energii przez poszczególne panele w ujęciu miesięcznym.
+Na przedstawionym wykresie dla niektórych paneli (id 0.05, 0.075, 0.025, 0.425) można zauważyć problem zerowych wartości produkowanej energii, który analizowano wcześniej. Nie zostało stwierdzone, czy w miesiącach, w których wyprodukowana energia jest na niskim poziomie lub zerowym jesy wynikiem błędów pomiarowych czy nieprodukowaniem energii przez elektrownie. Dla lepszej czytelności wykresów w nastepnym punkcie zostanie przedstawiony wykres wyprodukowanej energii przez poszczególne panele w ujęciu miesięcznym.
 
 ```{r, message=FALSE, fig.height = 8, fig.width = 11, fig.align = "left"}
 plot_ly(data = plots_data, x = ~date_posix, y = ~energy, color = ~place_string, colors = "Set1", visible = "legendonly", type="bar") %>%
@@ -299,7 +301,7 @@ plot_ly(data = plots_data, x = ~date_posix, y = ~energy, color = ~place_string, 
 ```
 
 ##Zmiana wytwarzanej energii w czasie w ujęciu miesięcznym dla każdego panelu
-Na podstawie wykresu wyprodukowanej energii w ujęciu miesięcznym przez panele możemy zaobserwować różnice w wyprodukowanej energii w zależności od pory roku. W miesiącach wiosennych i letnich wartości te są zdecydowanie wyższe niż w jesiennych i zimowych, co wskazuje na ogromy wpływ nasłonecznienia na wyprodukowaną energię.
+Na podstawie wykresu wyprodukowanej energii w ujęciu miesięcznym przez poszczególne panele możemy zaobserwować różnice w wyprodukowanej energii w zależności od pory roku. W miesiącach wiosennych i letnich wartości te są zdecydowanie wyższe niż w jesiennych i zimowych, co wskazuje na ogromy wpływ nasłonecznienia na wyprodukowaną energię.
 
 ```{r, message=FALSE, fig.height = 12, fig.width = 11, fig.align = "left"}
 plots_data$date_month <- as.character(as.POSIXct(as.character(plots_data$date), format="%m/%d/%Y %H:%M"), format="%Y/%m")
@@ -314,16 +316,17 @@ plot_ly(data = month_plots_data, x = ~date_month, y = ~month_energy, color = ~pl
 
 
 #Regresor
-Na podstawie macierzy korelacji zdecydowano się wybrać atrybuty radiation, himidity, mode, radiation_param, altitude oraz place (ze względu na konieczność rozróżniania paneli). Zastosowano 3 różne algorytmy: Random Forest, Bayesian Regularized Neural Networks oraz Neural Network (method neuralnet). Tutaj warto wspomnieć, że pomimo, że atrybut radiation jest skorelowany z atrybutem humidity, to oba te atrybuty wpływają na skuteczność regresora. W momencie wykorzystania algorytmu  Random Forest dla ntree = 10, wartość miary RMSE modelu wykorzystującego atrybuty radiation, himidity, mode, radiation_param, altitude oraz place była o 0.002 mniejsza niż modelu radiation, mode, radiation_param, altitude oraz place. Może to wynikać z faktu, że na podstawie rozkładu wartości można zauważyć, że czujnik wilgotności ani razu nie wskazał wartości zerowej (prawdopodobnie nie uległ nigdy awarii), natomiast czujnik nasłonecznienia miał stosunkowo dużo wartości zerowych (nie wynikających z nocnej pory). Stąd warto zastosować parametr humidity, ze względu na silną korelację z radiation, która jest silnie skorelowana z atrybutem energy (wyprodukowaną energią).
+Na podstawie macierzy korelacji zdecydowano się wybrać atrybuty radiation, himidity, mode, radiation_param, altitude oraz place (ze względu na konieczność rozróżniania paneli). Zastosowano 3 różne algorytmy: Random Forest, Bayesian Regularized Neural Networks oraz Neural Network (method nnet). Tutaj warto wspomnieć, że pomimo, że atrybut radiation jest skorelowany z atrybutem humidity, to oba te atrybuty wpływają na skuteczność regresora. W momencie wykorzystania algorytmu  Random Forest dla ntree = 10, wartość miary RMSE modelu wykorzystującego atrybuty radiation, himidity, mode, radiation_param, altitude oraz place była o 0.002 mniejsza niż modelu radiation, mode, radiation_param, altitude oraz place. Może to wynikać z faktu, że na podstawie rozkładu wartości można zauważyć, że czujnik wilgotności ani razu nie wskazał wartości zerowej (prawdopodobnie nie uległ nigdy awarii), natomiast czujnik nasłonecznienia miał stosunkowo dużo wartości zerowych niewynikających z nocnej pory. Stąd warto zastosować parametr humidity, ze względu na silną korelację z radiation, która jest silnie skorelowana z atrybutem energy (wyprodukowaną energią). Zbiór podzielono według atrybutu place (id panelu) w stosunku 75% zbiór uczący do 25% zbiór testowy.
 
 ##Random Forest
+###Podział zbioru na uczący i testowy
 
-```{r trainingSetrf30, echo=TRUE, cache = TRUE}
+```{r trainingSetrf30, echo=TRUE}
 set.seed(1)
 training_data <- needed_data
 inTraining <- 
     createDataPartition(
-        y = training_data$energy,
+        y = training_data$place,
         p = .75,
         list = FALSE)
 
@@ -331,7 +334,9 @@ training <- training_data[ inTraining,]
 testing  <- training_data[-inTraining,]
 ```
 
-```{r trainingSetrf30, echo=TRUE, cache = TRUE}
+###Proces uczenia
+
+```{r learningSetrf30, echo=TRUE, cache = TRUE}
 set.seed(1)
 ctrl <- trainControl(
     method = "repeatedcv",
@@ -347,21 +352,24 @@ fit <- train(energy ~ radiation + humidity + mode + radiation_param + altitude +
 fit
 ```
 
-```{r predictSetrf30, echo=TRUE, cache = TRUE}
-pred <- predict(modellist$'10', newdata = testing)
+###Predykcja
+
+```{r predictSetrf302, echo=TRUE}
+pred <- predict(fit, newdata = testing)
 dat <- data.frame(obs =  testing$energy,
                   pred = pred)
 defaultSummary(dat)
 ```
 
-##Bayesian Regularized Neural Networks
+###Podział zbioru na uczący i testowy (test dla atrybutu radiation)
+Najsilniej skorelowane z energią jest nasłonecznienie. Postanowiono sprawdzić jaką wartość RMSE można uzyskać, stosując w modelu tylko ten atrybut.
 
-```{r trainingSetbrnn30, echo=TRUE, cache = TRUE}
+```{r trainingSetrf302, echo=TRUE}
 set.seed(1)
 training_data <- needed_data
 inTraining <- 
     createDataPartition(
-        y = training_data$energy,
+        y = training_data$place,
         p = .75,
         list = FALSE)
 
@@ -369,24 +377,118 @@ training <- training_data[ inTraining,]
 testing  <- training_data[-inTraining,]
 ```
 
-```{r trainingSetbrnn30, echo=TRUE, cache = TRUE}
+###Proces uczenia (test dla atrybutu radiation)
+
+```{r learningSetrf302, echo=TRUE, cache = TRUE}
 set.seed(1)
 ctrl <- trainControl(
     method = "repeatedcv",
     number = 2,
     repeats = 5)
 	
-fit <- train(energy ~ radiation + humidity + mode + radiation_param + altitude +  place,
+fit <- train(energy ~ radiation  +  place,
              data = training,
-             method = "brnn",
+             method = "rf",
 	     metric = "RMSE",
-             trControl = ctrl)
+             trControl = ctrl, 
+		ntree = 30)
 fit
 ```
 
-```{r predictSetbrnn30, echo=TRUE, cache = TRUE}
+###Predykcja (test dla atrybutu radiation)
+
+```{r predictSetrf30, echo=TRUE}
 pred <- predict(fit, newdata = testing)
 dat <- data.frame(obs =  testing$energy,
                   pred = pred)
 defaultSummary(dat)
 ```
+
+##Bayesian Regularized Neural Networks
+###Podział zbioru na uczący i testowy
+```{r trainingSetbrnn30, echo=TRUE}
+set.seed(1)
+training_data <- needed_data
+inTraining <- 
+    createDataPartition(
+        y = training_data$place,
+        p = .75,
+        list = FALSE)
+
+training <- training_data[ inTraining,]
+testing  <- training_data[-inTraining,]
+```
+
+###Proces uczenia
+
+```{r learningSetbrnn30, echo=TRUE, message = FALSE, cache=TRUE, warning=FALSE, results = 'hide'}
+set.seed(1)
+ctrl <- trainControl(
+    method = "repeatedcv",
+    number = 2,
+    repeats = 5)
+	
+fit2 <- train(energy ~ radiation + humidity + mode + radiation_param + altitude +  place,
+             data = training,
+             method = "brnn",
+	     metric = "RMSE",
+             trControl = ctrl)
+```
+
+```{r, echo=TRUE}
+fit2
+```
+
+###Predykcja
+```{r predictSetbrnn30, echo=TRUE}
+pred <- predict(fit2, newdata = testing)
+dat <- data.frame(obs =  testing$energy,
+                  pred = pred)
+defaultSummary(dat)
+```
+
+##Neural Network (nnet)
+###Podział zbioru na uczący i testowy
+```{r trainingSetnn30, echo=TRUE}
+set.seed(1)
+training_data <- needed_data
+inTraining <- 
+    createDataPartition(
+        y = training_data$place,
+        p = .75,
+        list = FALSE)
+
+training <- training_data[ inTraining,]
+testing  <- training_data[-inTraining,]
+```
+
+###Proces uczenia
+
+```{r learningSetnn30, echo=TRUE, message = FALSE, cache=TRUE, warning=FALSE, results = 'hide'}
+set.seed(1)
+ctrl <- trainControl(
+    method = "repeatedcv",
+    number = 2,
+    repeats = 5)
+	
+fit3 <- train(energy ~ radiation + humidity + mode + radiation_param + altitude +  place,
+             data = training,
+             method = "nnet",
+	     metric = "RMSE",
+             trControl = ctrl)
+```
+
+```{r, echo=TRUE}
+fit3
+```
+
+###Predykcja
+```{r predictSetnn30, echo=TRUE}
+pred <- predict(fit3, newdata = testing)
+dat <- data.frame(obs =  testing$energy,
+                  pred = pred)
+defaultSummary(dat)
+```
+
+##Podsumowanie
+Naniższą wartość RMSE osiągnięto dla algorytmu Random Forest. Na podstawie przeprowadzonych testów stwierdzono, że wartość ntree = 30 jest najkorzystniejsza jeśli chodzi o wartość miary RMSE i czas wykonania (powyżej tej wartości czas uczenia bardzo się wydłuża, przy polepszeniu RMSE o mniej niż 0.0001). Najważniejszym atrybutem w modelu jest nasłonecznienie (radiation). 
